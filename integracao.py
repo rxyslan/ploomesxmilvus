@@ -6,10 +6,11 @@ from datetime import datetime, timedelta
 import pymongo
 
 start_time = time.time()
-ploomes_url = 'https://public5-api2.ploomes.com/Contacts?$orderby=CreateDate+desc&$expand=Contacts'
-ploomes_url_tasks = 'https://public5-api2.ploomes.com/Tasks?$expand=Tags&$orderby=CreateDate+desc'
+
+ploomes_url = 'https://public-api2.ploomes.com/Contacts?$orderby=CreateDate+desc&$expand=Contacts'
+ploomes_url_tasks = 'https://public-api2.ploomes.com/Tasks?$expand=Tags&$orderby=CreateDate+desc'
 milvus_url_tickets = 'https://apiintegracao.milvus.com.br/api/chamado/criar'
-ploomes_api_key = 'B8CDC14A9C93C84845C58F211386C69D5206B6558057704F48FC7C22CB46550F9909254198E0F3AB57FA6B03BAC9746AC209BC4C6BD2B19E6855E574A81A30DE'
+ploomes_api_key = '5C6D7306E820C3A4F21B6F8F3F109B9E9D080C1F5AEA0027F3248641B87F0D3338739DA713441A88FE5527DAAA6A9C002E4A1CB52A9EFF74EBCC8F7ECF30F8F6'
 headers_ploomes = {'user-key': ploomes_api_key}
 milvus_url_criar = 'https://apiintegracao.milvus.com.br/api/cliente/criar'
 milvus_url_buscar = 'https://apiintegracao.milvus.com.br/api/cliente/busca'
@@ -245,11 +246,13 @@ for task_data_ploomes in tasks_data_ploomes:
     if 'Tags' in task_data_ploomes and any(tag.get('TagId') in [40049715, 40049716, 40054183] for tag in task_data_ploomes['Tags']):
         data_hora_str = task_data_ploomes['CreateDate'][:-6]
         data_hora_tarefa = datetime.strptime(data_hora_str, '%Y-%m-%dT%H:%M:%S.%f')
+        # Supondo que fuso_horario já foi definido, por exemplo:
+        # fuso_horario = pytz.timezone("America/Sao_Paulo")
         data_hora_tarefa = fuso_horario.localize(data_hora_tarefa)
-        diferenca_tempo = hora_atual - data_hora_tarefa
+        diferenca_tempo = hora_atual - data_hora_tarefa  # Supondo que hora_atual já foi definida
         diferenca_minutos = diferenca_tempo.total_seconds() / 60
         
-        if diferenca_minutos <= 10:
+        if diferenca_minutos <= 5:
             # Iterar sobre os clientes do Ploomes
             for cliente_ploomes in clientes_ploomes:
                 cpf_cnpj_ploomes = cliente_ploomes.get('CPF') or cliente_ploomes.get('CNPJ')
@@ -266,26 +269,15 @@ for task_data_ploomes in tasks_data_ploomes:
                             
                             # Verificar se o ContactId da tarefa coincide com o Id do cliente do Ploomes
                             if task_data_ploomes.get('ContactId') == cliente_id_ploomes:
-
-                                # Verificar se a tag de Instalação está presente na tarefa do Ploomes
-                                tag_instalacao_presente = any(tag.get('TagId') == 40049716 for tag in task_data_ploomes.get('Tags', []))
-                                print(f"Tag de Instalação presente na tarefa: {tag_instalacao_presente}")
-
-                                # Verificar se a tag de Entrega está presente na tarefa do Ploomes
-                                tag_entrega_presente = any(tag.get('TagId') == 40049715 for tag in task_data_ploomes.get('Tags', []))
-                                print(f"Tag de Entrega presente na tarefa: {tag_entrega_presente}")
-
-                                # Definir a categoria primária da tarefa com base nas tags presentes
-                                if tag_instalacao_presente:
-                                    categoria_primaria = "Instalação"
-                                elif tag_entrega_presente:
-                                    categoria_primaria = "Entrega"
+                                # Definindo a categoria primária do chamado baseada nas tags
+                                if any(tag.get('TagId') == 40049716 for tag in task_data_ploomes['Tags']):
+                                    chamado_categoria_primaria = "Entrega"
+                                elif any(tag.get('TagId') == 40054183 for tag in task_data_ploomes['Tags']):
+                                    chamado_categoria_primaria = "Manutenção"
                                 else:
-                                    categoria_primaria = "Manutenção"
-
-                                print(f"Categoria primária da tarefa: {categoria_primaria}")
-
-                                # Criar os dados do ticket para o sistema Milvus
+                                    chamado_categoria_primaria = "Instalação"
+                                
+                                # Enviar a tarefa para o Milvus apenas se os CPF/CNPJ coincidirem e o ContactId da tarefa coincidir com o Id do cliente do Ploomes
                                 milvus_ticket_data = {
                                     "cliente_id": str(cliente_id_milvus),
                                     "chamado_assunto": task_data_ploomes.get("Title"),
@@ -296,15 +288,13 @@ for task_data_ploomes in tasks_data_ploomes:
                                     "chamado_tecnico": "",  
                                     "chamado_mesa": "",  
                                     "chamado_setor": "",  
-                                    "chamado_categoria_primaria": categoria_primaria,
-                                    "chamado_categoria_secundaria": "" 
+                                    "chamado_categoria_primaria": chamado_categoria_primaria, 
+                                    "chamado_categoria_secundaria": ""  
                                 }
 
-                                print("Dados do ticket para o sistema Milvus:", milvus_ticket_data)
-
-
-
+                                # Supondo que headers_milvus e milvus_url_tickets já foram definidos
                                 response_milvus = requests.post(milvus_url_tickets, json=milvus_ticket_data, headers=headers_milvus)
+
                                 
                                 if response_milvus.status_code == 200:
                                     print("Tarefa enviada com sucesso para o Milvus!")
